@@ -192,6 +192,7 @@ def train_with_grasp(train_loader, model, optimizer, scheduler, scaler, epoch, a
     data_time = AverageMeter('Data', ':2.2f')
     lr = AverageMeter('Lr', ':1.6f')
     loss_meter = AverageMeter('Loss', ':2.4f')
+    ins_loss_meter = AverageMeter('Loss_ins', ':2.4f')
     qua_loss_metter = AverageMeter('Loss_qua', ':2.4f')
     sin_loss_metter = AverageMeter('Loss_sin', ':2.4f')
     cos_loss_metter = AverageMeter('Loss_cos', ':2.4f')
@@ -207,9 +208,15 @@ def train_with_grasp(train_loader, model, optimizer, scheduler, scaler, epoch, a
         if _model_predicts_short_side(model)
         else None
     )
+    lgd_contrast_loss_meter = (
+        AverageMeter('Loss_lgd_contrast', ':2.4f')
+        if str(getattr(args, "architecture", "")).lower() == "lgd"
+        else None
+    )
     iou_meter = AverageMeter('IoU', ':2.2f')
     pr_meter = AverageMeter('Prec@50', ':2.2f')
     component_loss_meters = [
+        ins_loss_meter,
         qua_loss_metter,
         sin_loss_metter,
         cos_loss_metter,
@@ -219,6 +226,8 @@ def train_with_grasp(train_loader, model, optimizer, scheduler, scaler, epoch, a
         component_loss_meters.append(off_loss_metter)
     if short_loss_metter is not None:
         component_loss_meters.append(short_loss_metter)
+    if lgd_contrast_loss_meter is not None:
+        component_loss_meters.append(lgd_contrast_loss_meter)
     progress = ProgressMeter(
         len(train_loader),
         [
@@ -290,6 +299,16 @@ def train_with_grasp(train_loader, model, optimizer, scheduler, scaler, epoch, a
                 model_inputs = (*model_inputs, grasp_short_mask)
             pred, target, loss, loss_dict = model(*model_inputs)
 
+        if not bool(torch.isfinite(loss.detach()).item()):
+            components = {
+                name: float(torch.as_tensor(value).detach().float().cpu())
+                for name, value in loss_dict.items()
+            }
+            raise FloatingPointError(
+                "Non-finite training loss before backward: "
+                f"epoch={epoch}, step={i + 1}, components={components}"
+            )
+
         ins_mask_pred = pred[0]
         ins_mask_target = target[0]
 
@@ -307,7 +326,11 @@ def train_with_grasp(train_loader, model, optimizer, scheduler, scaler, epoch, a
         if should_step:
             if args.max_norm:
                 scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(),
+                    args.max_norm,
+                    error_if_nonfinite=True,
+                )
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
@@ -322,6 +345,7 @@ def train_with_grasp(train_loader, model, optimizer, scheduler, scaler, epoch, a
         pr5 = pr5 / dist.get_world_size()
 
         loss_meter.update(loss.item(), image.size(0))
+        ins_loss_meter.update(loss_dict["m_ins"], image.size(0))
         qua_loss_metter.update(loss_dict["m_qua"], image.size(0))
         sin_loss_metter.update(loss_dict["m_sin"], image.size(0))
         cos_loss_metter.update(loss_dict["m_cos"], image.size(0))
@@ -330,6 +354,10 @@ def train_with_grasp(train_loader, model, optimizer, scheduler, scaler, epoch, a
             off_loss_metter.update(loss_dict["m_off"], image.size(0))
         if short_loss_metter is not None:
             short_loss_metter.update(loss_dict["m_short"], image.size(0))
+        if lgd_contrast_loss_meter is not None:
+            lgd_contrast_loss_meter.update(
+                loss_dict["m_lgd_contrast"], image.size(0)
+            )
         iou_meter.update(iou.item(), image.size(0))
         pr_meter.update(pr5.item(), image.size(0))
         lr.update(scheduler.get_last_lr()[-1])

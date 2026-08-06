@@ -88,12 +88,19 @@ class GraspToolSupportTest(unittest.TestCase):
         self.assertIn(
             "text_state = F.normalize(text_state.float(), dim=-1)", lgd
         )
+        self.assertIn("eps=1e-4", lgd)
+        self.assertIn("if self.contrastive_weight > 0.0:", lgd)
+        self.assertIn("_masked_geometry_loss", lgd)
         for model_name in ("ggcnnclip", "lgd"):
             cfg = yaml.safe_load(
                 (ROOT / "config" / "grasp_tools" / f"{model_name}.yaml")
                 .read_text(encoding="utf-8")
             )
             self.assertEqual(cfg["TRAIN"]["max_norm"], 1.0)
+            if model_name == "lgd":
+                self.assertEqual(
+                    cfg["TRAIN"]["lgd_contrastive_weight"], 0.0
+                )
 
     def test_builder_and_adapter_cover_schema_v21(self):
         builder = (ROOT / "utils" / "data_builder.py").read_text(encoding="utf-8")

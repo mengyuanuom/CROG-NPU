@@ -22,8 +22,10 @@ TRAIN:
   lgd_timesteps: 1000
   lgd_sampling_steps: 50
   lgd_diffusion_weight: 1.0
-  lgd_contrastive_weight: 0.001
+  # Optional non-official ablation. Keep disabled for stable sparse-map training.
+  lgd_contrastive_weight: 0.0
   lgd_contrastive_temperature: 0.1
+  lgd_geometry_mask_threshold: 0.05
   sync_bn: False
   amp: False
   optimizer: adam
