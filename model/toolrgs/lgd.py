@@ -112,6 +112,8 @@ class LGDCore(nn.Module):
     @staticmethod
     def _apply_film(feature, parameters):
         gamma, beta = parameters.chunk(2, dim=1)
+        gamma = torch.tanh(gamma)
+        beta = torch.tanh(beta)
         return feature * (1.0 + gamma[:, :, None, None]) + beta[:, :, None, None]
 
     def forward(self, image, noisy_quality, timesteps, text_state):
@@ -251,6 +253,7 @@ class LGD(nn.Module):
         grasp_off_weight=None,
     ):
         _, text_state = self.backbone.encode_text(word)
+        text_state = F.normalize(text_state.float(), dim=-1)
         targets = self._resize_targets(
             img.shape[-2:],
             ins_mask,

@@ -63,6 +63,7 @@ class GraspToolSupportTest(unittest.TestCase):
                     cfg["TEST"]["evaluation_protocol"], "crog_legacy"
                 )
                 self.assertEqual(cfg["TEST"]["grasp_size_activation"], "auto")
+                self.assertTrue(cfg["TEST"]["restore_grasp_size_scale"])
 
     def test_drogoff_skips_fixed_generator_short_side(self):
         cfg = yaml.safe_load(
@@ -73,6 +74,26 @@ class GraspToolSupportTest(unittest.TestCase):
         self.assertFalse(cfg["TRAIN"].get("predict_grasp_short_side", False))
         self.assertNotIn("short_side_loss_weight", cfg["TRAIN"])
         self.assertTrue(cfg["TEST"]["use_offset_at_inference"])
+
+    def test_unstable_film_models_bound_text_conditioning(self):
+        ggcnn = (ROOT / "model" / "toolrgs" / "ggcnnclip.py").read_text(
+            encoding="utf-8"
+        )
+        lgd = (ROOT / "model" / "toolrgs" / "lgd.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("torch.tanh(self.gamma(h))", ggcnn)
+        self.assertIn("state = F.normalize(state.float(), dim=-1)", ggcnn)
+        self.assertIn("gamma = torch.tanh(gamma)", lgd)
+        self.assertIn(
+            "text_state = F.normalize(text_state.float(), dim=-1)", lgd
+        )
+        for model_name in ("ggcnnclip", "lgd"):
+            cfg = yaml.safe_load(
+                (ROOT / "config" / "grasp_tools" / f"{model_name}.yaml")
+                .read_text(encoding="utf-8")
+            )
+            self.assertEqual(cfg["TRAIN"]["max_norm"], 1.0)
 
     def test_builder_and_adapter_cover_schema_v21(self):
         builder = (ROOT / "utils" / "data_builder.py").read_text(encoding="utf-8")

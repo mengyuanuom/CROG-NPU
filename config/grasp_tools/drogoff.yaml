@@ -81,6 +81,7 @@ TEST:
   test_batch_size: 32
   test_workers: 2
   grasp_size_activation: auto
+  restore_grasp_size_scale: True
   use_offset_at_inference: True
   filter_grasps_by_segmentation: False
   offset_resample_geometry: True

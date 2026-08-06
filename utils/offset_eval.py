@@ -199,10 +199,12 @@ def resample_grasp_geometry(
         sampled_sine = _sample_bilinear(sine, center_x, center_y)
         sampled_cosine = _sample_bilinear(cosine, center_x, center_y)
         sampled_width = _sample_bilinear(width, center_x, center_y)
-        sampled_short = (
+        decoded_short = (
             height
             if short_side is None
-            else _sample_bilinear(short_side, center_x, center_y) * width_factor
+            else _sample_bilinear(short_side, center_x, center_y)
+            * width_factor
+            * float(size_scale)
         )
         angle_degrees = float(
             0.5 * np.arctan2(sampled_sine, sampled_cosine) / np.pi * 180.0
@@ -213,7 +215,7 @@ def resample_grasp_geometry(
                     center_x,
                     center_y,
                     max(1.0, sampled_width * float(width_factor) * float(size_scale)),
-                    max(1.0, sampled_short * float(size_scale)),
+                    max(1.0, decoded_short),
                     angle_degrees,
                 ],
                 dtype=np.float32,

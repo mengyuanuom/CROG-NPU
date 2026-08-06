@@ -305,15 +305,21 @@ def detect_grasps(
         grasp_point = tuple(p_array)
         grasp_angle = grasp_angle_mask[grasp_point] / np.pi * 180
         grasp_width = grasp_wid_mask[grasp_point]
-        if grasp_short_mask is None and float(size_scale) == 1.0:
-            grasps.append([float(grasp_point[1]), float(grasp_point[0]), grasp_width*max_width, 20, grasp_angle])
+        if grasp_short_mask is None:
+            # Width is supervised after the image is resized into model space,
+            # so it must be scaled back with the inverse affine transform. The
+            # Grasp-Tools/CROG protocol, however, defines the short side as a
+            # fixed 20 pixels in the original image and must not scale it.
+            grasps.append([
+                float(grasp_point[1]),
+                float(grasp_point[0]),
+                max(1.0, grasp_width * max_width * float(size_scale)),
+                20.0,
+                grasp_angle,
+            ])
             continue
 
-        grasp_short = (
-            20.0
-            if grasp_short_mask is None
-            else float(grasp_short_mask[grasp_point]) * max_width
-        )
+        grasp_short = float(grasp_short_mask[grasp_point]) * max_width
         grasps.append([
             float(grasp_point[1]),
             float(grasp_point[0]),

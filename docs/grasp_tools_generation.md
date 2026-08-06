@@ -80,3 +80,12 @@ the `prompt_cycle` marker remain compatible.
 
 The canonical category is always stored separately in each query, so changing
 wording does not change the target label.
+
+## Grasp geometry during evaluation
+
+The source backgrounds are 1280×720 while model inputs are smaller. Grasp
+centres and dense maps are inverse-warped to the original canvas for the CROG
+Jacquard scorer. The normalized long-side prediction is multiplied by the
+inverse resize scale at that point. The short side remains exactly 20 pixels
+for models without a dedicated short-side head, matching the generated labels
+and the legacy CROG evaluation protocol.

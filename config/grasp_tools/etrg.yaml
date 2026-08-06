@@ -71,4 +71,5 @@ TEST:
   test_batch_size: 32
   test_workers: 2
   grasp_size_activation: auto
+  restore_grasp_size_scale: True
   visualize: False
