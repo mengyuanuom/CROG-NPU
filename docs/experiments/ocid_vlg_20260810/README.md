@@ -1,21 +1,26 @@
 # OCID-VLG evaluation - 2026-08-10
 
-This report records the OCID-VLG test-set evaluation run on server commit
-`91d3c51ab5c6a8964c5b4357675d7d3b3def35b6`.
+This report combines the OCID-VLG test-set evaluations run with current model
+code (`91d3c51`/`3fac083`) and compatibility evaluations for pre-August-6
+checkpoints using their training-era code (`b09d9bf`). Commit `3fac083` only
+adds evaluation profiles, tests, and this report on top of `91d3c51`; model
+forward code is identical between those two current commits.
 
 ## Scope
 
 - Dataset split: `test`, 17,749 referring-expression samples.
 - Protocol: `crog_legacy`.
-- Hardware: 8 Ascend 910B3 NPUs, split into two concurrent four-NPU jobs.
+- Hardware: 8 Ascend 910B3 NPUs. Primary tests used four NPUs per model;
+  compatibility A/B runs used two NPUs per model.
 - Loader: batch size 32 and 2 workers per NPU.
 - Visualization: disabled.
 - The evaluator shards samples without padding and sums all statistics across
   ranks before reporting metrics.
 
-Only DROG and DROG-OFF had trained OCID-VLG checkpoints on the server. CROG,
-LGD, GGCNNCLIP, GRConvNetCLIP, and ETRG could not be evaluated because no
-checkpoint existed under `exp/OCID-VLG`.
+DROG and DROG-OFF were stored under `exp/OCID-VLG`. Four additional complete
+runs were later found under the separately cased `exp/ocid_vlg`: LGD,
+GGCNNCLIP, GRConvNetCLIP, and ETRG. CROG is the only requested architecture
+for which no complete OCID-VLG checkpoint was found.
 
 Before evaluation, the eight NPUs were occupied by `npu_resource_filler.py`.
 That dedicated filler process and its orphaned workers were stopped. No NPU
@@ -27,6 +32,10 @@ process remained after both evaluations completed.
 | --- | ---: | ---: | ---: | ---: | --- |
 | DROG-OFF | 30 | 82.11 | 91.24 | 94.12 | sigmoid (matched) |
 | DROG | 36 | 82.31 | 85.78 | 93.57 | sigmoid (mismatched) |
+| LGD | 35 | 67.59 | 84.28 | 88.71 | sigmoid (legacy mismatch) |
+| GRConvNetCLIP | 36 | 2.31 | 86.27 | 90.94 | sigmoid (legacy mismatch) |
+| GGCNNCLIP | 36 | 2.31 | 20.26 | 24.32 | sigmoid (legacy mismatch) |
+| ETRG | 34 | 76.66 | 73.55 | 78.77 | sigmoid (legacy mismatch) |
 
 The training logs report `world_size: 1` and batch size 32 for both models.
 Both 36-epoch runs completed without an exception. Training time was 1 day
@@ -38,10 +47,21 @@ Both 36-epoch runs completed without an exception. Training time was 1 day
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | DROG-OFF | 81.23 | 97.02 | 95.66 | 89.19 | 68.54 | 22.33 | **89.30** | 92.94 |
 | DROG | **81.38** | **97.39** | **96.40** | **89.67** | 67.82 | 22.03 | 89.10 | **93.58** |
+| LGD (training-era code) | 65.94 | 88.38 | 79.14 | 54.71 | 26.96 | 0.02 | 84.94 | 87.27 |
+| GRConvNetCLIP | 2.30 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 88.14 | 91.21 |
+| GGCNNCLIP (training-era code) | 2.30 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 15.32 | 17.13 |
+| ETRG | 74.97 | 90.21 | 87.27 | 78.70 | 53.71 | 12.66 | 73.73 | 76.85 |
 
 DROG-OFF leads test J@1 by only 0.20 points, while DROG leads IoU by 0.15 and
 J@5 by 0.64 points. The original DROG validation number is not directly
 comparable because it used a mismatched sigmoid width decoder.
+
+Among the additional models, GRConvNetCLIP is closest to DROG/DROG-OFF on
+grasp success (88.14 J@1), followed by LGD (84.94). ETRG reaches 73.73, while
+GGCNNCLIP is substantially weaker at 15.32. The IoU and Pr@50--90 columns are
+not meaningful segmentation measures for GRConvNetCLIP or GGCNNCLIP: those
+wrappers have no segmentation head and explicitly reuse the grasp-quality map
+as `ins_pred`.
 
 ## DROG width-decoder A/B
 
@@ -66,11 +86,45 @@ comparison is validation clamp 89.62/94.50 versus test clamp 89.10/93.58:
 the test split is lower by 0.52 J@1 and 0.92 J@5. DROG-OFF remains sigmoid
 because its width loss applies sigmoid during training.
 
+## Legacy-checkpoint compatibility
+
+All four additional checkpoints contain `grasp_size_activation=None`. Their
+training-time evaluator therefore used the legacy sigmoid fallback. The model
+losses regressed normalized width directly, so the aligned decoder is clamp.
+
+LGD and GGCNNCLIP also require their training-era forward implementation.
+Commit `1427e0a` (August 6, after these checkpoints were trained) added bounded
+FiLM parameters and normalized CLIP text states to both models. LGD additionally
+changed its internal width output in `91d3c51`. These changes preserve state-dict
+shapes, so strict loading succeeds, but they change forward semantics enough to
+invalidate direct evaluation of the old weights with current code.
+
+The compatibility worktree at `b09d9bf` reproduces the historical validation
+results before running aligned clamp test evaluation:
+
+| Model/run | Split | Decoder | J@1 | J@5 | Interpretation |
+| --- | --- | --- | ---: | ---: | --- |
+| LGD, current code | test | clamp | 8.66 | 8.89 | incompatible; exclude |
+| LGD, training-era code | val | sigmoid | 84.14 | 88.48 | reproduces 84.28/88.71 within diffusion randomness |
+| LGD, training-era code | test | clamp | **84.94** | **87.27** | reported result |
+| GGCNNCLIP, current code | test | clamp | 6.70 | 8.94 | incompatible; exclude |
+| GGCNNCLIP, training-era code | val | sigmoid | 20.26 | 24.32 | exact historical reproduction |
+| GGCNNCLIP, training-era code | test | clamp | **15.32** | **17.13** | reported result |
+
+GRConvNetCLIP and ETRG did not receive a post-training forward-semantic change,
+so their current-code clamp evaluations are valid. LGD diffusion sampling starts
+from random noise; the small validation reproduction difference is expected
+because the standalone test entry point does not set a deterministic seed.
+
 ## Checkpoint identity
 
 ```text
 1b18ea348918854eac60ad55294f518e06a6b05613feeb946a202a37de0950e3  best_epoch_030_J1_91.24_J5_94.12.pth
 93462598fe0967e256b034a843bc4fa45c64d8f223385777fa6591b01e47dd06  best_epoch_036_J1_85.78_J5_93.57.pth
+c592238ba07f4cf82959f6909579688ed11058d82bfdc48fbf90d1457ffd6b53  best_epoch_035_J1_84.28_J5_88.71.pth
+f75c4d1142b3fa16187bfeac914548fffd449be3a1c756607654a89919ab4a63  best_epoch_036_J1_86.27_J5_90.94.pth
+0575999e856c42384ec8aca33caa22230d0b9a59a4060f661e23530b47cc7660  best_epoch_036_J1_20.26_J5_24.32.pth
+e2ef4265a80c6caa9e1f106f5aa49b64fba5b70a2a610433573eed07b55c2a2e  best_epoch_034_J1_73.55_J5_78.77.pth
 ```
 
 ## Reproduction
@@ -101,5 +155,10 @@ effective settings from the complete DROG-OFF profile with the architecture
 overridden to DROG. The configuration fix included with this report makes the
 clean DROG command above directly reproducible.
 
-Raw rank-0 logs are stored beside this report as `drogoff_test.txt`,
-`drog_test.txt`, `drog_val_clamp.txt`, and `drog_val_sigmoid.txt`.
+Raw rank-0 logs are stored beside this report. In addition to the four DROG
+logs, the valid additional-model logs are `grconvnetclip_test.txt`,
+`etrg_test.txt`, `lgd_test_legacy_clamp.txt`, and
+`ggcnnclip_test_legacy_clamp.txt`. Validation reproductions are
+`lgd_val_legacy_sigmoid.txt` and `ggcnnclip_val_legacy_sigmoid.txt`; the two
+explicitly excluded diagnostics are `lgd_current_code_incompatible.txt` and
+`ggcnnclip_current_code_incompatible.txt`.
