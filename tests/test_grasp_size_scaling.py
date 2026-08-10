@@ -42,7 +42,7 @@ class GraspSizeScalingTest(unittest.TestCase):
         )
         self.assertEqual(len(grasps), 1)
         self.assertAlmostEqual(grasps[0][2], 150.0)
-        self.assertAlmostEqual(grasps[0][3], 60.0)
+        self.assertAlmostEqual(grasps[0][3], 60.0, delta=1e-5)
 
     def test_offset_resampling_keeps_fixed_protocol_height(self):
         rectangles = [[5.0, 5.0, 150.0, 20.0, 0.0]]

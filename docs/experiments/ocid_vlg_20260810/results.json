@@ -1,0 +1,79 @@
+{
+  "date": "2026-08-10",
+  "server_commit": "91d3c51ab5c6a8964c5b4357675d7d3b3def35b6",
+  "dataset": {
+    "name": "OCID-VLG",
+    "split": "test",
+    "samples": 17749,
+    "protocol": "crog_legacy"
+  },
+  "evaluation": {
+    "hardware": "Ascend 910B3",
+    "world_size_per_model": 4,
+    "batch_size_per_device": 32,
+    "workers_per_device": 2
+  },
+  "models": [
+    {
+      "architecture": "drogoff",
+      "checkpoint": "best_epoch_030_J1_91.24_J5_94.12.pth",
+      "checkpoint_sha256": "1b18ea348918854eac60ad55294f518e06a6b05613feeb946a202a37de0950e3",
+      "grasp_size_activation": "sigmoid",
+      "validation": {"iou": 82.11, "j1": 91.24, "j5": 94.12},
+      "test": {
+        "iou": 81.23,
+        "pr50": 97.02,
+        "pr60": 95.66,
+        "pr70": 89.19,
+        "pr80": 68.54,
+        "pr90": 22.33,
+        "j1": 89.30,
+        "j5": 92.94
+      }
+    },
+    {
+      "architecture": "drog",
+      "checkpoint": "best_epoch_036_J1_85.78_J5_93.57.pth",
+      "checkpoint_sha256": "93462598fe0967e256b034a843bc4fa45c64d8f223385777fa6591b01e47dd06",
+      "grasp_size_activation": "clamp",
+      "validation": {
+        "iou": 82.31,
+        "j1": 89.62,
+        "j5": 94.50,
+        "grasp_size_activation": "clamp",
+        "source": "2026-08-10 aligned re-evaluation"
+      },
+      "historical_training_log_validation": {
+        "iou": 82.31,
+        "j1": 85.78,
+        "j5": 93.57,
+        "grasp_size_activation": "sigmoid",
+        "note": "legacy mismatch; exactly reproduced by the A/B run"
+      },
+      "test": {
+        "iou": 81.38,
+        "pr50": 97.39,
+        "pr60": 96.40,
+        "pr70": 89.67,
+        "pr80": 67.82,
+        "pr90": 22.03,
+        "j1": 89.10,
+        "j5": 93.58
+      }
+    }
+  ],
+  "drog_width_decoder_ab": {
+    "split": "val",
+    "samples": 8669,
+    "checkpoint": "best_epoch_036_J1_85.78_J5_93.57.pth",
+    "clamp": {"iou": 82.31, "j1": 89.62, "j5": 94.50},
+    "sigmoid": {"iou": 82.31, "j1": 85.78, "j5": 93.57}
+  },
+  "missing_checkpoints": [
+    "crog",
+    "lgd",
+    "ggcnnclip",
+    "grconvnetclip",
+    "etrg"
+  ]
+}

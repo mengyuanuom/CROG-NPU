@@ -323,7 +323,8 @@ class OfficialCROGNPUConfigTest(unittest.TestCase):
             "shape=(480, 640)",
             "min_distance=2",
             "threshold_abs=0.4",
-            "grasp_width*max_width, 20",
+            "grasp_width * max_width * float(size_scale)",
+            "20.0",
             "grasp_targets[:, 3] = 20",
             "grasp_targets[:, 2] = np.clip(grasp_targets[:, 2], 0, 100)",
             "if iou > iou_threshold:",
@@ -488,6 +489,34 @@ class OfficialCROGNPUConfigTest(unittest.TestCase):
                 self.assertRegex(
                     source,
                     r"(?m)^\s*evaluation_protocol:\s*crog_legacy\s*$",
+                )
+
+    def test_primary_ocid_profiles_define_batchable_auto_decoding(self):
+        profiles = (
+            "drogoff.yaml",
+            "drog.yaml",
+            "crog_multiple_r50.yaml",
+            "lgd.yaml",
+            "ggcnnclip.yaml",
+            "grconvnetclip.yaml",
+            "etrg.yaml",
+        )
+        for name in profiles:
+            source = (ROOT / "config" / "OCID-VLG" / name).read_text(
+                encoding="utf-8"
+            )
+            with self.subTest(config=name):
+                self.assertRegex(
+                    source,
+                    r"(?m)^\s*test_batch_size:\s*32\b",
+                )
+                self.assertRegex(
+                    source,
+                    r"(?m)^\s*test_workers:\s*2\b",
+                )
+                self.assertRegex(
+                    source,
+                    r"(?m)^\s*grasp_size_activation:\s*auto\s*$",
                 )
 
 if __name__ == "__main__":
