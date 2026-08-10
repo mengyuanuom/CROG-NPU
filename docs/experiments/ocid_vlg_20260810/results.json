@@ -3,6 +3,7 @@
   "server_commits": {
     "drog_drogoff_evaluation": "91d3c51ab5c6a8964c5b4357675d7d3b3def35b6",
     "additional_current_evaluation": "3fac0830759c89097f3e7c938a00a5d471a50ff2",
+    "crog_evaluation": "20c9a6c7b6f105926a906d97803da0d44094b4c2",
     "legacy_compatibility_evaluation": "b09d9bf"
   },
   "dataset": {
@@ -103,6 +104,37 @@
       }
     },
     {
+      "architecture": "crog",
+      "checkpoint": "best_epoch_017_J1_85.80_J5_91.33.pth",
+      "checkpoint_sha256": "ba992ca78436ee47b32baa3162f9aeed3fc4e8b05f9223e03c74c1cf0616318b",
+      "evaluation_code_commit": "20c9a6c7b6f105926a906d97803da0d44094b4c2",
+      "grasp_size_activation": "clamp",
+      "validation": {
+        "iou": 80.34,
+        "j1": 88.67,
+        "j5": 92.19,
+        "grasp_size_activation": "clamp",
+        "source": "2026-08-10 aligned re-evaluation"
+      },
+      "historical_training_log_validation": {
+        "iou": 80.34,
+        "j1": 85.80,
+        "j5": 91.33,
+        "grasp_size_activation": "sigmoid",
+        "note": "legacy mismatch; exactly reproduced by the A/B run"
+      },
+      "test": {
+        "iou": 79.34,
+        "pr50": 95.68,
+        "pr60": 93.21,
+        "pr70": 84.53,
+        "pr80": 63.48,
+        "pr90": 17.01,
+        "j1": 88.17,
+        "j5": 91.36
+      }
+    },
+    {
       "architecture": "grconvnetclip",
       "checkpoint": "best_epoch_036_J1_86.27_J5_90.94.pth",
       "checkpoint_sha256": "f75c4d1142b3fa16187bfeac914548fffd449be3a1c756607654a89919ab4a63",
@@ -194,11 +226,18 @@
     "clamp": {"iou": 82.31, "j1": 89.62, "j5": 94.50},
     "sigmoid": {"iou": 82.31, "j1": 85.78, "j5": 93.57}
   },
+  "crog_width_decoder_ab": {
+    "split": "val",
+    "samples": 8669,
+    "checkpoint": "best_epoch_017_J1_85.80_J5_91.33.pth",
+    "clamp": {"iou": 80.34, "j1": 88.67, "j5": 92.19},
+    "sigmoid": {"iou": 80.34, "j1": 85.80, "j5": 91.33}
+  },
   "legacy_compatibility": {
     "affected_architectures": ["lgd", "ggcnnclip"],
     "training_era_commit": "b09d9bf",
     "post_training_forward_change_commit": "1427e0a",
     "note": "strict state-dict loading succeeds but current forward semantics invalidate old weights"
   },
-  "missing_checkpoints": ["crog"]
+  "missing_checkpoints": []
 }
