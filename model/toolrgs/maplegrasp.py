@@ -7,6 +7,8 @@ The model structure, parameter names, losses, hard 0.35 mask gate, and
 stage-1/stage-2 contract follow the official release. The only model-level
 changes are device-neutral execution, shape-safe mask resizing, and a fused
 grouped convolution that avoids non-zero-storage-offset split views on Ascend.
+An optional VCoT extension adds a predicted grasp short side while preserving
+the official four-map Stage-2 head for legacy configurations and checkpoints.
 """
 
 import torch
@@ -28,6 +30,7 @@ class MultiTaskProjectorPP(nn.Module):
         stage1=False,
         stage2=False,
         use_gt_obj_masks=False,
+        predict_short_side=False,
     ):
         super().__init__()
         if bool(stage1) == bool(stage2):
@@ -39,6 +42,8 @@ class MultiTaskProjectorPP(nn.Module):
         self.stage1 = bool(stage1)
         self.stage2 = bool(stage2)
         self.use_gt_obj_masks = bool(use_gt_obj_masks)
+        self.predict_short_side = bool(predict_short_side) and self.stage2
+        self.num_grasp_outputs = 5 if self.predict_short_side else 4
 
         # Preserve the official names for Stage-1 -> Stage-2 loading.
         self.vis = nn.Sequential(
@@ -49,7 +54,9 @@ class MultiTaskProjectorPP(nn.Module):
         )
         self.vis_mask = nn.Conv2d(in_dim, in_dim, 1)
         if self.stage2:
-            self.vis_grasp = nn.Conv2d(in_dim, in_dim * 4, 1)
+            self.vis_grasp = nn.Conv2d(
+                in_dim, in_dim * self.num_grasp_outputs, 1
+            )
         self.txt = nn.Linear(
             word_dim, in_dim * kernel_size * kernel_size + 1
         )
@@ -106,20 +113,23 @@ class MultiTaskProjectorPP(nn.Module):
 
         gate = self._grasp_gate(mask_out, mask, (height, width))
         grasp_features = self.vis_grasp(x).reshape(
-            batch_size, 4, channels, height, width
+            batch_size, self.num_grasp_outputs, channels, height, width
         )
         grasp_features = grasp_features * gate.unsqueeze(1)
 
-        # Equivalent to upstream's four convolutions, fused to avoid split
+        # Equivalent to upstream's per-map convolutions, fused to avoid split
         # views with non-zero storage offsets on Ascend.
         grouped_input = grasp_features.reshape(
-            1, batch_size * 4 * channels, height, width
+            1,
+            batch_size * self.num_grasp_outputs * channels,
+            height,
+            width,
         )
         grouped_weight = (
             weight[:, None]
-            .expand(-1, 4, -1, -1, -1)
+            .expand(-1, self.num_grasp_outputs, -1, -1, -1)
             .reshape(
-                batch_size * 4,
+                batch_size * self.num_grasp_outputs,
                 channels,
                 self.kernel_size,
                 self.kernel_size,
@@ -128,8 +138,8 @@ class MultiTaskProjectorPP(nn.Module):
         )
         grouped_bias = (
             bias[:, None]
-            .expand(-1, 4)
-            .reshape(batch_size * 4)
+            .expand(-1, self.num_grasp_outputs)
+            .reshape(batch_size * self.num_grasp_outputs)
             .contiguous()
         )
         grasp_out = F.conv2d(
@@ -137,15 +147,15 @@ class MultiTaskProjectorPP(nn.Module):
             grouped_weight,
             bias=grouped_bias,
             padding=self.kernel_size // 2,
-            groups=batch_size * 4,
-        ).reshape(batch_size, 4, height, width)
-        return (
-            mask_out,
-            grasp_out[:, 0:1].contiguous(),
-            grasp_out[:, 1:2].contiguous(),
-            grasp_out[:, 2:3].contiguous(),
-            grasp_out[:, 3:4].contiguous(),
+            groups=batch_size * self.num_grasp_outputs,
+        ).reshape(
+            batch_size, self.num_grasp_outputs, height, width
         )
+        grasp_maps = tuple(
+            grasp_out[:, index:index + 1].contiguous()
+            for index in range(self.num_grasp_outputs)
+        )
+        return (mask_out, *grasp_maps)
 
 
 class MapleGrasp(nn.Module):
@@ -158,6 +168,18 @@ class MapleGrasp(nn.Module):
         self.stage1 = bool(cfg.stage1)
         self.stage2 = bool(cfg.stage2)
         self.use_gt_obj_masks = bool(cfg.use_gt_obj_masks)
+        self.predicts_grasp_short_side = self.stage2 and bool(
+            getattr(cfg, "predict_grasp_short_side", False)
+        )
+        self.short_side_loss_weight = float(
+            getattr(cfg, "short_side_loss_weight", 1.0)
+        )
+        self.align_grasp_size_loss = bool(
+            getattr(cfg, "align_grasp_size_loss", False)
+        )
+        self.grasp_size_loss_activation = (
+            "sigmoid" if self.align_grasp_size_loss else None
+        )
         if self.stage1 == self.stage2:
             raise ValueError(
                 "MapleGrasp requires exactly one of stage1 or stage2 to be True"
@@ -196,6 +218,7 @@ class MapleGrasp(nn.Module):
             self.stage1,
             self.stage2,
             self.use_gt_obj_masks,
+            self.predicts_grasp_short_side,
         )
 
     @staticmethod
@@ -217,6 +240,7 @@ class MapleGrasp(nn.Module):
         grasp_sin_mask=None,
         grasp_cos_mask=None,
         grasp_wid_mask=None,
+        grasp_short_mask=None,
         grasp_off_mask=None,
         grasp_off_weight=None,
     ):
@@ -257,34 +281,45 @@ class MapleGrasp(nn.Module):
                 loss_dict,
             )
 
+        targets = (
+            mask,
+            grasp_qua_mask,
+            grasp_sin_mask,
+            grasp_cos_mask,
+            grasp_wid_mask,
+        )
+        if self.predicts_grasp_short_side:
+            targets = (*targets, grasp_short_mask)
         if not self.training:
-            targets = (
-                mask,
-                grasp_qua_mask,
-                grasp_sin_mask,
-                grasp_cos_mask,
-                grasp_wid_mask,
-            )
             return tuple(item.detach() for item in outputs), targets
 
         targets = tuple(
             self._resize_target(target, outputs[0].shape[-2:])
-            for target in (
-                mask,
-                grasp_qua_mask,
-                grasp_sin_mask,
-                grasp_cos_mask,
-                grasp_wid_mask,
-            )
+            for target in targets
         )
         segmentation_loss = F.binary_cross_entropy_with_logits(
             outputs[0], targets[0], weight=targets[0] * 0.5 + 1.0
         )
-        grasp_losses = tuple(
-            F.smooth_l1_loss(prediction, target)
-            for prediction, target in zip(outputs[1:], targets[1:])
-        )
-        total_loss = segmentation_loss + sum(grasp_losses)
+        grasp_losses = [
+            F.smooth_l1_loss(outputs[index], targets[index])
+            for index in range(1, 4)
+        ]
+        size_losses = [
+            F.smooth_l1_loss(
+                torch.sigmoid(outputs[index])
+                if self.align_grasp_size_loss
+                else outputs[index],
+                targets[index],
+            )
+            for index in range(4, len(outputs))
+        ]
+        grasp_losses.extend(size_losses)
+        total_loss = segmentation_loss + sum(grasp_losses[:4])
+        if self.predicts_grasp_short_side:
+            total_loss = (
+                total_loss
+                + self.short_side_loss_weight * grasp_losses[4]
+            )
         loss_dict = {
             "m_ins": segmentation_loss.item(),
             "m_qua": grasp_losses[0].item(),
@@ -292,6 +327,8 @@ class MapleGrasp(nn.Module):
             "m_cos": grasp_losses[2].item(),
             "m_wid": grasp_losses[3].item(),
         }
+        if self.predicts_grasp_short_side:
+            loss_dict["m_short"] = grasp_losses[4].item()
         return (
             tuple(item.detach() for item in outputs),
             targets,

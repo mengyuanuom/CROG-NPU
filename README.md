@@ -347,6 +347,31 @@ interrupted Stage 1 or Stage 2 run, leave `weight` empty and set `TRAIN.resume`
 to that stage's `epoch_010_model.pth` (or its current `best_epoch_*.pth`).
 `config/OCID-VLG/maplegrasp.yaml` is a Stage-1-compatible alias.
 
+### VCoT extension
+
+The VCoT extension preserves MapleGrasp's two-stage mask-guided pooling flow.
+Stage 1 remains segmentation-only. Stage 2 optionally expands the official
+four grasp maps with a predicted short-side map, so the output is mask,
+quality, sine, cosine, long side, and short side. Legacy OCID-VLG configs and
+checkpoint shapes remain unchanged.
+
+Train the VCoT segmentation stage first:
+
+```bash
+bash tools/train_8npu.sh config/vcot/maplegrasp_stage1.yaml
+```
+
+Then train the VCoT grasp stage from the best Stage-1 IoU checkpoint:
+
+```bash
+bash tools/train_8npu.sh config/vcot/maplegrasp_stage2.yaml
+```
+
+The VCoT Stage-2 profile uses `grasp_size_factor: 300`, applies sigmoid to
+both size maps in the Smooth-L1 loss, records sigmoid checkpoint metadata for
+matched inference, validates with the official single-grasp protocol on Seen,
+and defaults standalone testing to Unseen.
+
 The upstream README names a MapleGrasp YAML that is not present in its released
 git tree. Consequently, this port keeps the CROG schedule used by the model
 base optimizer (Adam at `1e-4`); its schedule follows the repository-wide
