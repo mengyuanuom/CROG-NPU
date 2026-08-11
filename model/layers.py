@@ -45,17 +45,20 @@ class CoordConv(nn.Module):
 
 
 class MultiTaskProjector(nn.Module):
-    def __init__(self, word_dim=1024, in_dim=256, kernel_size=3):
+    def __init__(self, word_dim=1024, in_dim=256, kernel_size=3,
+                 predict_short_side=False):
         super().__init__()
         self.in_dim = in_dim
         self.kernel_size = kernel_size
+        self.predict_short_side = bool(predict_short_side)
+        self.num_outputs = 6 if self.predict_short_side else 5
         # visual projector
         self.vis = nn.Sequential(  # os16 -> os4
             nn.Upsample(scale_factor=2, mode='bilinear'),
             conv_layer(in_dim * 2, in_dim * 2, 3, padding=1),
             nn.Upsample(scale_factor=2, mode='bilinear'),
             conv_layer(in_dim * 2, in_dim, 3, padding=1),
-            nn.Conv2d(in_dim, in_dim*5, 1))
+            nn.Conv2d(in_dim, in_dim * self.num_outputs, 1))
 
         # textual projector
         out_dim = 1 * in_dim * kernel_size * kernel_size + 1
@@ -66,70 +69,33 @@ class MultiTaskProjector(nn.Module):
             x: b, 512, 26, 26
             word: b, 512
         '''
-        x = self.vis(x)
-        x = torch.tensor_split(x, 5, dim=1) # no tensor_split api in torch 1.7, please use it in higher version
-        # x = torch.chunk(x, 5, dim=1)
+        feature_maps = torch.tensor_split(
+            self.vis(x), self.num_outputs, dim=1
+        )
+        batch_size, channels, _, _ = feature_maps[0].shape
 
-        mask_x = x[0]
-        grasp_qua_x = x[1]
-        grasp_sin_x = x[2]
-        grasp_cos_x = x[3]
-        grasp_wid_x = x[4]
-
-        B, C, H, W = mask_x.size()
-
-
-        # 1, b*256, 104, 104
-        mask_x = mask_x.reshape(1, B * C, H, W)
-        grasp_qua_x = grasp_qua_x.reshape(1, B * C, H, W)
-        grasp_sin_x = grasp_sin_x.reshape(1, B * C, H, W)
-        grasp_cos_x = grasp_cos_x.reshape(1, B * C, H, W)
-        grasp_wid_x = grasp_wid_x.reshape(1, B * C, H, W)
-
-
-        # txt: b, (256*3*3 + 1) -> b, 256, 3, 3 / b
+        # The same text-conditioned dynamic kernel projects every task map.
         word = self.txt(word)
         weight, bias = word[:, :-1], word[:, -1]
-        weight = weight.reshape(B, C, self.kernel_size, self.kernel_size)
-        # Conv2d - 1, b*256, 104, 104 -> 1, b, 104, 104
-        mask_out = F.conv2d(mask_x,
-                       weight,
-                       padding=self.kernel_size // 2,
-                       groups=weight.size(0),
-                       bias=bias)
-        
-        grasp_qua_out = F.conv2d(grasp_qua_x,
-                            weight,
-                            padding=self.kernel_size // 2,
-                            groups=weight.size(0),
-                            bias=bias)
-        
-        grasp_sin_out = F.conv2d(grasp_sin_x,
-                            weight,
-                            padding=self.kernel_size // 2,
-                            groups=weight.size(0),
-                            bias=bias)
+        weight = weight.reshape(
+            batch_size, channels, self.kernel_size, self.kernel_size
+        )
 
-        grasp_cos_out = F.conv2d(grasp_cos_x,
-                            weight,
-                            padding=self.kernel_size // 2,
-                            groups=weight.size(0),
-                            bias=bias)
-        
-        grasp_wid_out = F.conv2d(grasp_wid_x,
-                            weight,
-                            padding=self.kernel_size // 2,
-                            groups=weight.size(0),
-                            bias=bias)
-            
-        mask_out = mask_out.transpose(0, 1)
-        grasp_qua_out = grasp_qua_out.transpose(0, 1)
-        grasp_sin_out = grasp_sin_out.transpose(0, 1)
-        grasp_cos_out = grasp_cos_out.transpose(0, 1)
-        grasp_wid_out = grasp_wid_out.transpose(0, 1)
-        # b, 1, 104, 104
-
-        return mask_out, grasp_qua_out, grasp_sin_out, grasp_cos_out, grasp_wid_out
+        outputs = []
+        for feature_map in feature_maps:
+            _, _, height, width = feature_map.shape
+            feature_map = feature_map.reshape(
+                1, batch_size * channels, height, width
+            )
+            output = F.conv2d(
+                feature_map,
+                weight,
+                padding=self.kernel_size // 2,
+                groups=weight.size(0),
+                bias=bias,
+            )
+            outputs.append(output.transpose(0, 1))
+        return tuple(outputs)
 
 
 class Projector(nn.Module):

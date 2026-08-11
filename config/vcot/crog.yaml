@@ -6,7 +6,7 @@ DATA:
   with_depth: False
   train_split: train
   val_split: seen
-  grasp_size_factor: 100
+  grasp_size_factor: 300
 MODEL:
   architecture: crog
 TRAIN:
@@ -50,6 +50,8 @@ TRAIN:
   val_start_epoch: 11
   save_epochs: [5, 10]
   grasp_sr_topk: 5
+  predict_grasp_short_side: True
+  short_side_loss_weight: 1.0
   weight:
   resume:
   evaluate: True

@@ -163,6 +163,10 @@ the same command. Train on one selected NPU with:
 ASCEND_RT_VISIBLE_DEVICES=3 python3 train_crog.py --config config/vcot/drogoff.yaml
 ```
 
+For VCoT, both `config/vcot/crog.yaml` and `config/vcot/drogoff.yaml`
+predict the long and short grasp-rectangle sides. The optional CROG short-side
+head is disabled by default for legacy OCID-VLG and Grasp-Tools checkpoints.
+
 VCoT evaluation uses the public paper protocol rather than CROG's historical
 raster scorer: exactly one predicted grasp, continuous rotated-rectangle IoU
 `>= 0.25`, and 180-degree-periodic angle difference `<= 30` degrees. The metric

@@ -1,8 +1,11 @@
 from pathlib import Path
+import importlib.util
 import unittest
 
 import numpy as np
+import torch
 import yaml
+
 
 from utils.vcot_geometry import grasp_anything_to_quads, resolve_vcot_split
 from utils.vcot_eval import (
@@ -13,6 +16,12 @@ from utils.vcot_eval import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LAYERS_SPEC = importlib.util.spec_from_file_location(
+    "crog_layers_for_test", ROOT / "model" / "layers.py"
+)
+LAYERS_MODULE = importlib.util.module_from_spec(LAYERS_SPEC)
+LAYERS_SPEC.loader.exec_module(LAYERS_MODULE)
+MultiTaskProjector = LAYERS_MODULE.MultiTaskProjector
 
 
 class VCoTDrogoffSupportTest(unittest.TestCase):
@@ -61,6 +70,32 @@ class VCoTDrogoffSupportTest(unittest.TestCase):
         self.assertEqual(cfg["TRAIN"]["short_side_loss_weight"], 1.0)
         self.assertTrue(cfg["TEST"]["restore_grasp_size_scale"])
         self.assertEqual(cfg["DATA"]["grasp_size_factor"], 300)
+
+    def test_vcot_crog_predicts_long_and_short_sides(self):
+        path = ROOT / "config" / "vcot" / "crog.yaml"
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+        self.assertEqual(cfg["MODEL"]["architecture"], "crog")
+        self.assertEqual(cfg["DATA"]["grasp_size_factor"], 300)
+        self.assertTrue(cfg["TRAIN"]["predict_grasp_short_side"])
+        self.assertEqual(cfg["TRAIN"]["short_side_loss_weight"], 1.0)
+
+        model = (ROOT / "model" / "crog.py").read_text(encoding="utf-8")
+        self.assertIn("predicts_grasp_short_side", model)
+        self.assertIn('loss_dict["m_short"]', model)
+
+        image_features = torch.randn(2, 4, 3, 3)
+        text_features = torch.randn(2, 8)
+        legacy = MultiTaskProjector(word_dim=8, in_dim=2, kernel_size=3)
+        vcot = MultiTaskProjector(
+            word_dim=8,
+            in_dim=2,
+            kernel_size=3,
+            predict_short_side=True,
+        )
+        self.assertEqual(len(legacy(image_features, text_features)), 5)
+        outputs = vcot(image_features, text_features)
+        self.assertEqual(len(outputs), 6)
+        self.assertTrue(all(output.shape == (2, 1, 12, 12) for output in outputs))
 
     def test_train_test_and_launcher_route_vcot(self):
         trainer = (ROOT / "train_crog.py").read_text(encoding="utf-8")
