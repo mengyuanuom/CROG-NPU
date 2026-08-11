@@ -89,6 +89,8 @@ TEST:
   test_split: unseen
   evaluation_protocol: vcot_official
   grasp_topk: [1]
+  test_batch_size: 32
+  test_workers: 2
   grasp_size_activation: auto
   use_offset_at_inference: True
   filter_grasps_by_segmentation: False
