@@ -166,8 +166,15 @@ ASCEND_RT_VISIBLE_DEVICES=3 python3 train_crog.py --config config/vcot/drogoff.y
 VCoT evaluation uses the public paper protocol rather than CROG's historical
 raster scorer: exactly one predicted grasp, continuous rotated-rectangle IoU
 `>= 0.25`, and 180-degree-periodic angle difference `<= 30` degrees. The metric
-is logged as `GraspSR`, and the rolling best is named like
-`best_epoch_011_GraspSR_72.34.pth`. Evaluate the unseen split with:
+is logged as `GraspSR`. Training keeps `latest_model.pth`, an independent
+best-IoU checkpoint, the rolling best GraspSR checkpoint named like
+`best_epoch_011_GraspSR_72.34.pth`, and the five strongest validation GraspSR
+checkpoints named `top_graspsr_epoch_*.pth`. Change `TRAIN.grasp_sr_topk` to
+adjust the retained ranking size. Top-k files use hard links when the filesystem
+supports them, so aliases of the same epoch do not duplicate checkpoint data.
+When resuming into a new timestamped run directory, ranked files recorded in
+the checkpoint are linked or copied forward automatically. Evaluate the unseen
+split with:
 
 ```bash
 ASCEND_RT_VISIBLE_DEVICES=3 python3 test_crog.py \

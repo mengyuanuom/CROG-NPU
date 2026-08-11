@@ -1,5 +1,6 @@
 import argparse
 import datetime
+import math
 import os
 from pathlib import Path
 import shutil
@@ -84,6 +85,68 @@ def _replace_metric_alias(source, output_dir, prefix, epoch, metric_suffix):
     return target
 
 
+def _select_grasp_sr_topk(entries, keep):
+    """Return deterministic, resume-safe metadata for the best GraspSR epochs."""
+    keep = int(keep)
+    if keep <= 0:
+        return []
+    by_epoch = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            epoch = int(entry["epoch"])
+            score = float(entry["score"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if epoch <= 0 or not math.isfinite(score):
+            continue
+        by_epoch[epoch] = {
+            "epoch": epoch,
+            "score": score,
+            "filename": (
+                f"top_graspsr_epoch_{epoch:03d}_"
+                f"GraspSR_{100.0 * score:.2f}.pth"
+            ),
+        }
+    return sorted(
+        by_epoch.values(),
+        key=lambda entry: (-entry["score"], entry["epoch"]),
+    )[:keep]
+
+
+def _sync_grasp_sr_topk(source, output_dir, entries, current_epoch):
+    """Materialize the current top-k member and remove checkpoints that fell out."""
+    output_dir = Path(output_dir)
+    desired_names = {entry["filename"] for entry in entries}
+    current_target = None
+    for entry in entries:
+        if entry["epoch"] == int(current_epoch):
+            current_target = output_dir / entry["filename"]
+            _replace_with_link_or_copy(source, current_target)
+            break
+    for previous in output_dir.glob("top_graspsr_epoch_*.pth"):
+        if previous.name not in desired_names:
+            previous.unlink()
+    return current_target
+
+
+def _restore_grasp_sr_topk(checkpoint_path, output_dir, entries):
+    """Restore ranked checkpoint links when resume creates a new run directory."""
+    source_dir = Path(checkpoint_path).parent
+    output_dir = Path(output_dir)
+    restored = []
+    missing = []
+    for entry in entries:
+        source = source_dir / entry["filename"]
+        if source.is_file():
+            _replace_with_link_or_copy(source, output_dir / source.name)
+            restored.append(source.name)
+        else:
+            missing.append(source.name)
+    return restored, missing
+
+
 def _normalize_checkpoint_keys(state_dict, model):
     """Match plain and DDP checkpoint key prefixes without changing names."""
     target_keys = tuple(model.state_dict().keys())
@@ -115,7 +178,10 @@ def _resolve_timestamped_checkpoint(checkpoint_path):
         if (run_directory / requested.name).is_file()
     ]
     legacy_patterns = {
-        "best_iou_model.pth": ("best_epoch_*_IoU_*.pth",),
+        "best_iou_model.pth": (
+            "best_iou_epoch_*_IoU_*.pth",
+            "best_epoch_*_IoU_*.pth",
+        ),
         "best_jindex_model.pth": (
             "best_j1_epoch_*_J1_*_J5_*.pth",
             "best_epoch_*_J1_*_J5_*.pth",
@@ -476,6 +542,16 @@ def main_worker(local_rank, args):
     best_IoU = -1.0
     best_j1 = -1.0
     best_j5 = -1.0
+    is_vcot_official = args.evaluation_protocol == "vcot_official"
+    grasp_sr_topk_limit = int(
+        getattr(args, "grasp_sr_topk", 5 if is_vcot_official else 0)
+    )
+    if is_vcot_official and grasp_sr_topk_limit <= 0:
+        raise ValueError(
+            "TRAIN.grasp_sr_topk must be positive for vcot_official, got "
+            f"{grasp_sr_topk_limit}"
+        )
+    grasp_sr_topk = []
     last_eval_epoch = 0
     last_iou = None
     last_prec_dict = {}
@@ -492,6 +568,25 @@ def main_worker(local_rank, args):
             best_j5 = checkpoint.get("best_j5", -1.0)
             best_j1 = float(best_j1)
             best_j5 = float(best_j5)
+            grasp_sr_topk = _select_grasp_sr_topk(
+                checkpoint.get("grasp_sr_topk", []),
+                grasp_sr_topk_limit,
+            )
+            if args.rank == 0 and grasp_sr_topk:
+                restored, missing = _restore_grasp_sr_topk(
+                    args.resume, args.output_dir, grasp_sr_topk
+                )
+                logger.info(
+                    "=> restored {} VCoT GraspSR top-k checkpoint(s)",
+                    len(restored),
+                )
+                if missing:
+                    logger.warning(
+                        "=> {} ranked checkpoint file(s) were unavailable "
+                        "next to the resume checkpoint: {}",
+                        len(missing),
+                        missing,
+                    )
             last_eval_epoch = int(
                 checkpoint.get("last_eval_epoch", checkpoint["epoch"])
             )
@@ -562,11 +657,13 @@ def main_worker(local_rank, args):
         logger.info(
             "Validation schedule: enabled={}, starts at epoch {}, every {} "
             "epoch(s); recovery checkpoints={}; checkpoint policy=latest "
-            "+ scheduled recovery + independent metric-labelled bests",
+            "+ scheduled recovery + independent metric-labelled bests; "
+            "VCoT GraspSR top-k={}",
             evaluate_enabled,
             val_start_epoch,
             val_freq,
             list(save_epochs),
+            grasp_sr_topk_limit if is_vcot_official else "disabled",
         )
 
     # start training
@@ -640,7 +737,9 @@ def main_worker(local_rank, args):
             save_latest = True
             save_recovery = epoch_log in save_epochs
             save_best_iou = bool(
-                do_eval and segmentation_only and improved_iou
+                do_eval
+                and improved_iou
+                and (segmentation_only or is_vcot_official)
             )
             save_best_j1 = bool(
                 do_eval and not segmentation_only and improved_j1
@@ -648,6 +747,19 @@ def main_worker(local_rank, args):
             save_best_j5 = bool(
                 do_eval and not segmentation_only and improved_j5
             )
+            if (
+                do_eval
+                and is_vcot_official
+                and len(j_index) >= 1
+                and math.isfinite(float(j_index[0]))
+            ):
+                grasp_sr_topk = _select_grasp_sr_topk(
+                    [
+                        *grasp_sr_topk,
+                        {"epoch": epoch_log, "score": float(j_index[0])},
+                    ],
+                    grasp_sr_topk_limit,
+                )
             if (
                 save_latest
                 or save_recovery
@@ -666,6 +778,7 @@ def main_worker(local_rank, args):
                     'best_j_index': best_j1,
                     'best_j1': best_j1,
                     'best_j5': best_j5,
+                    'grasp_sr_topk': grasp_sr_topk,
                     'prec': prec_dict,
                     'j_index': j_index,
                     'last_eval_epoch': last_eval_epoch,
@@ -705,14 +818,29 @@ def main_worker(local_rank, args):
                     )
 
                 if save_best_iou:
+                    iou_prefix = "best" if segmentation_only else "best_iou"
                     best_name = _replace_metric_alias(
                         temporary_checkpoint,
                         args.output_dir,
-                        "best",
+                        iou_prefix,
                         epoch_log,
                         f"IoU_{100.0 * float(iou):.2f}",
                     )
                     logger.info("Replaced best checkpoint: {}", best_name)
+
+                if do_eval and is_vcot_official:
+                    ranked_name = _sync_grasp_sr_topk(
+                        temporary_checkpoint,
+                        args.output_dir,
+                        grasp_sr_topk,
+                        epoch_log,
+                    )
+                    if ranked_name is not None:
+                        logger.info(
+                            "Saved VCoT GraspSR top-{} checkpoint: {}",
+                            grasp_sr_topk_limit,
+                            ranked_name,
+                        )
 
                 if save_best_j1:
                     j1 = float(j_index[0])

@@ -185,9 +185,9 @@ class ToolRGSModelMigrationTest(unittest.TestCase):
         source = (ROOT / "train_crog.py").read_text(encoding="utf-8")
         self.assertIn("def _load_maplegrasp_stage1", source)
         self.assertIn("def _resolve_timestamped_checkpoint", source)
-        self.assertIn(
-            '"best_iou_model.pth": ("best_epoch_*_IoU_*.pth",)', source
-        )
+        self.assertIn('"best_iou_model.pth": (', source)
+        self.assertIn('"best_iou_epoch_*_IoU_*.pth"', source)
+        self.assertIn('"best_epoch_*_IoU_*.pth"', source)
         self.assertIn("model.load_state_dict(state_dict, strict=False)", source)
         self.assertIn('"module.proj.vis_grasp.weight"', source)
         self.assertIn(

@@ -70,6 +70,7 @@ class OfficialCROGNPUConfigTest(unittest.TestCase):
             "OCID-VLG/ggcnnclip.yaml",
             "OCID-VLG/etrg.yaml",
             "vcot/drogoff.yaml",
+            "vcot/crog.yaml",
         }
         for path in sorted(config_dir.rglob("*.yaml")):
             source = path.read_text(encoding="utf-8")
@@ -80,9 +81,16 @@ class OfficialCROGNPUConfigTest(unittest.TestCase):
             )
             expected_epochs = 36 if is_long_run else 24
             expected_milestone = 30 if is_long_run else 20
+            expected_batch = 256 if relative_config == "vcot/crog.yaml" else 32
             with self.subTest(config=relative_config):
-                self.assertRegex(source, r"(?m)^\s*batch_size:\s*32\b")
-                self.assertRegex(source, r"(?m)^\s*batch_size_val:\s*32\b")
+                self.assertRegex(
+                    source,
+                    rf"(?m)^\s*batch_size:\s*{expected_batch}\b",
+                )
+                self.assertRegex(
+                    source,
+                    rf"(?m)^\s*batch_size_val:\s*{expected_batch}\b",
+                )
                 self.assertRegex(
                     source, rf"(?m)^\s*epochs:\s*{expected_epochs}\s*$"
                 )
@@ -285,6 +293,14 @@ class OfficialCROGNPUConfigTest(unittest.TestCase):
         self.assertIn("'best_j5': best_j5", source)
         self.assertIn("save_best_j1", source)
         self.assertIn("save_best_j5", source)
+        self.assertIn("grasp_sr_topk_limit", source)
+        self.assertIn("'grasp_sr_topk': grasp_sr_topk", source)
+        self.assertIn("_sync_grasp_sr_topk(", source)
+        self.assertIn("_restore_grasp_sr_topk(", source)
+        self.assertIn(
+            'iou_prefix = "best" if segmentation_only else "best_iou"',
+            source,
+        )
         self.assertIn('metric_prefix = "best_j1"', source)
         self.assertIn('"best_j5",', source)
         self.assertIn('f"IoU_{100.0 * float(iou):.2f}"', source)
@@ -303,6 +319,18 @@ class OfficialCROGNPUConfigTest(unittest.TestCase):
             "for metric_pattern in metric_patterns", source
         )
         self.assertIn("os.remove(temporary_checkpoint)", source)
+
+    def test_vcot_keeps_five_ranked_grasp_sr_checkpoints(self):
+        trainer = (ROOT / "train_crog.py").read_text(encoding="utf-8")
+        config = (ROOT / "config" / "vcot" / "drogoff.yaml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("def _select_grasp_sr_topk", trainer)
+        self.assertIn('output_dir.glob("top_graspsr_epoch_*.pth")', trainer)
+        self.assertRegex(
+            config,
+            r"(?m)^\s*grasp_sr_topk:\s*5\s*(?:#.*)?$",
+        )
 
 
     def test_drog_family_uses_crog_scorer_after_model_postprocess(self):
