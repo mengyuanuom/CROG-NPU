@@ -1,6 +1,10 @@
-# Language-guided Robot Grasping: CLIP-based Referring Grasp Synthesis in Clutter (CoRL2023)
+# PanguCROG-NPU: Language-guided Robot Grasping
 
 Created by Georgios Tziafas, Yucheng XU, Arushi Goel, Mohammadreza Kasaei, Zhibin Li, Hamidreza Kasaei
+
+This maintained fork exposes every model through a Pangu-prefixed public name,
+such as `PanguCROG`, `PanguDROG`, and `PanguMapleGrasp`. Legacy names remain
+available so existing checkpoints, scripts, and experiments continue to work.
 
 This is an official PyTorch implementation of the baseline end-to-end model [CROG](https://arxiv.org/abs/2311.05779) of our work. The implementation of our CROG model is based on the [CRIS](https://github.com/DerrickWang005/CRIS.pytorch) model, thanks for their amazing work! :beers:
 
@@ -31,17 +35,33 @@ Robots operating in human-centric environments require the integration of visual
 This implementation only supports **multi-gpu**, **DistributedDataParallel** training, which is faster and simpler; single-gpu or DataParallel training is not supported. Besides, the evaluation only supports single-gpu mode. In our case, we train the CROG on 2 RTX-4090 GPUs. The training procedure takes around 3.5 hours. To do training of CROG with 2 GPUs, run:
 
 ```
-python -u train_crog.py --config config/OCID-VLG/CROG_multiple_r50.yaml
+python -u train_crog.py --config config/OCID-VLG/pangu_crog_multiple_r50.yaml
 ```
 
 To do training of SSG with 2 GPUs, run:
 ```
-python -u train_ssg.py --config config/OCID-Grasp/ssg_r50.yaml
+python -u train_ssg.py --config config/OCID-Grasp/pangu_ssg_r50.yaml
 ```
 
 **Please remember to modify the path to the dataset in config files.**
 
 ## Ascend NPU port
+
+### Pangu-prefixed model namespace
+
+New experiments should use the Pangu-prefixed YAML files. The model factory
+accepts both namespaces:
+
+| Pangu name | Legacy alias |
+| --- | --- |
+| `pangu_crog` | `crog` |
+| `pangu_drog` | `drog` |
+| `pangu_drogoff` | `drogoff` |
+| `pangu_maplegrasp` | `maplegrasp` |
+| `pangu_etrg`, `pangu_ggcnnclip`, `pangu_grconvnetclip` | corresponding legacy name |
+| `pangu_graspmamba`, `pangu_lgd`, `pangu_crogoff` | corresponding legacy name |
+
+Dataset names, paths, and annotation formats are unchanged.
 
 Every YAML under `config/` sets both training and validation batch size to
 `32`. CROG and DROG use Adam at `1e-4`; DROG-OFF uses `4e-4`. Every profile
@@ -98,7 +118,7 @@ it is absent and verifies its SHA-256 before training. Run the original CROG
 experiment on eight NPUs with:
 
 ```bash
-bash tools/train_8npu.sh config/OCID-VLG/crog_multiple_r50.yaml
+bash tools/train_8npu.sh config/OCID-VLG/pangu_crog_multiple_r50.yaml
 ```
 
 Every training profile uses the same launcher and passes exactly one YAML path
@@ -113,7 +133,7 @@ Evaluate a CROG checkpoint on one NPU with:
 
 ```bash
 ASCEND_RT_VISIBLE_DEVICES=0 python3 test_crog.py \
-  --config config/OCID-VLG/crog_multiple_r50.yaml \
+  --config config/OCID-VLG/pangu_crog_multiple_r50.yaml \
   --opts DATA.root_path datasets/OCID-VLG \
          TRAIN.resume exp/OCID-VLG_multiple_npu/CROG_official_multiple_R50_8npu/best_epoch_XXX_J1_XX.XX_J5_XX.XX.pth \
          TEST.test_split test
@@ -125,7 +145,7 @@ metrics are summed with HCCL:
 ```bash
 ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun \
   --standalone --nproc_per_node=8 test_crog.py \
-  --config config/OCID-VLG/crog_multiple_r50.yaml \
+  --config config/OCID-VLG/pangu_crog_multiple_r50.yaml \
   --opts DATA.root_path datasets/OCID-VLG \
          TRAIN.resume exp/OCID-VLG_multiple_npu/CROG_official_multiple_R50_8npu/best_epoch_XXX_J1_XX.XX_J5_XX.XX.pth \
          TEST.test_split test
@@ -134,7 +154,7 @@ ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun \
 
 ## VCoT/Grasp-Anything DROG-OFF
 
-`config/vcot/drogoff.yaml` trains DROG-OFF on the compact VCoT subset. The
+`config/vcot/pangu_drogoff.yaml` trains DROG-OFF on the compact VCoT subset. The
 default data root is `datasets/graspanything-vcot` and must contain:
 
 ```text
@@ -153,17 +173,17 @@ The global batch size is 32 and the learning rate is `4e-4`.
 Train on eight NPUs:
 
 ```bash
-bash tools/train_8npu.sh config/vcot/drogoff.yaml
+bash tools/train_8npu.sh config/vcot/pangu_drogoff.yaml
 ```
 
 For a non-default location, set `DATA_ROOT` (and optionally `SPLIT_ROOT`) before
 the same command. Train on one selected NPU with:
 
 ```bash
-ASCEND_RT_VISIBLE_DEVICES=3 python3 train_crog.py --config config/vcot/drogoff.yaml
+ASCEND_RT_VISIBLE_DEVICES=3 python3 train_crog.py --config config/vcot/pangu_drogoff.yaml
 ```
 
-For VCoT, both `config/vcot/crog.yaml` and `config/vcot/drogoff.yaml`
+For VCoT, both `config/vcot/pangu_crog.yaml` and `config/vcot/pangu_drogoff.yaml`
 predict the long and short grasp-rectangle sides. The optional CROG short-side
 head is disabled by default for legacy OCID-VLG and Grasp-Tools checkpoints.
 
@@ -182,7 +202,7 @@ split with:
 
 ```bash
 ASCEND_RT_VISIBLE_DEVICES=3 python3 test_crog.py \
-  --config config/vcot/drogoff.yaml \
+  --config config/vcot/pangu_drogoff.yaml \
   --opts TRAIN.resume exp/vcot/drogoff_vcot_8npu_TIMESTAMP/best_epoch_XXX_GraspSR_XX.XX.pth
 ```
 
@@ -190,7 +210,7 @@ The existing `config/OCID-VLG/*.yaml` profiles continue to use the unchanged
 CROG legacy J@1/J@5 evaluation path.
 
 ## DROG and DROG-OFF with the CROG scoring protocol
-`config/OCID-VLG/drog.yaml` and `config/OCID-VLG/drogoff.yaml` select the
+`config/OCID-VLG/pangu_drog.yaml` and `config/OCID-VLG/pangu_drogoff.yaml` select the
 DINOv2/CLIP-B16 models. DROG-OFF keeps its offset post-processing, while all
 resulting grasp rectangles are judged by CROG's scoring functions. The launcher
 checks `pretrain/` and automatically downloads either missing official backbone
@@ -199,24 +219,24 @@ before starting `torchrun`. Direct model construction performs the same check.
 Train DROG on eight NPUs:
 
 ```bash
-bash tools/train_8npu.sh config/OCID-VLG/drog.yaml
+bash tools/train_8npu.sh config/OCID-VLG/pangu_drog.yaml
 ```
 
 Train DROG-OFF with the same launcher:
 
 ```bash
-bash tools/train_8npu.sh config/OCID-VLG/drogoff.yaml
+bash tools/train_8npu.sh config/OCID-VLG/pangu_drogoff.yaml
 ```
 
 Evaluate a DROG checkpoint on one NPU:
 
 ```bash
 ASCEND_RT_VISIBLE_DEVICES=0 python3 test_crog.py \
-  --config config/OCID-VLG/drog.yaml \
+  --config config/OCID-VLG/pangu_drog.yaml \
   --opts TRAIN.resume exp/OCID-VLG/drog_ocid_vlg_8npu/best_epoch_XXX_J1_XX.XX_J5_XX.XX.pth
 ```
 
-Use `config/OCID-VLG/drogoff.yaml` and the matching checkpoint for DROG-OFF.
+Use `config/OCID-VLG/pangu_drogoff.yaml` and the matching checkpoint for DROG-OFF.
 Eight-NPU evaluation uses the same `torchrun --nproc_per_node=8 test_crog.py`
 form documented above for CROG.
 
@@ -251,8 +271,8 @@ and testing.
 Evaluate both ablations on one NPU with the baseline checkpoint:
 
 ```bash
-ASCEND_RT_VISIBLE_DEVICES=0 python3 test_crog.py --config config/OCID-VLG/drogoff_mask_filter.yaml --opts TRAIN.resume exp/OCID-VLG/drogoff_ocid_vlg_8npu/best_epoch_XXX_J1_XX.XX_J5_XX.XX.pth
-ASCEND_RT_VISIBLE_DEVICES=0 python3 test_crog.py --config config/OCID-VLG/drogoff_no_offset.yaml --opts TRAIN.resume exp/OCID-VLG/drogoff_ocid_vlg_8npu/best_epoch_XXX_J1_XX.XX_J5_XX.XX.pth
+ASCEND_RT_VISIBLE_DEVICES=0 python3 test_crog.py --config config/OCID-VLG/pangu_drogoff_mask_filter.yaml --opts TRAIN.resume exp/OCID-VLG/drogoff_ocid_vlg_8npu/best_epoch_XXX_J1_XX.XX_J5_XX.XX.pth
+ASCEND_RT_VISIBLE_DEVICES=0 python3 test_crog.py --config config/OCID-VLG/pangu_drogoff_no_offset.yaml --opts TRAIN.resume exp/OCID-VLG/drogoff_ocid_vlg_8npu/best_epoch_XXX_J1_XX.XX_J5_XX.XX.pth
 ```
 
 Change only the `TRAIN.resume` path if the baseline checkpoint is stored
@@ -294,7 +314,7 @@ organization's PEM CA certificate:
 
 ```bash
 export CROG_NPU_CA_BUNDLE=/path/to/company-ca.pem
-bash tools/train_8npu.sh config/OCID-VLG/drogoff.yaml
+bash tools/train_8npu.sh config/OCID-VLG/pangu_drogoff.yaml
 ```
 
 The downloader also recognizes `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, and
@@ -304,7 +324,7 @@ network:
 
 ```bash
 CROG_NPU_INSECURE_DOWNLOAD=1 \
-  bash tools/train_8npu.sh config/OCID-VLG/drogoff.yaml
+  bash tools/train_8npu.sh config/OCID-VLG/pangu_drogoff.yaml
 ```
 
 For a one-off manual download, use `--ca-bundle FILE` or `--insecure`.
@@ -314,7 +334,7 @@ Custom locations can be supplied without editing files:
 
 ```bash
 DATA_ROOT=/data/OCID-VLG CLIP_WEIGHT=/data/RN50.pt \
-  bash tools/train_8npu.sh config/OCID-VLG/crog_multiple_r50.yaml
+  bash tools/train_8npu.sh config/OCID-VLG/pangu_crog_multiple_r50.yaml
 ```
 
 ## MapleGrasp official two-stage NPU flow
@@ -331,7 +351,7 @@ runtime adaptations.
 Train Stage 1 (referred-object segmentation) first:
 
 ```bash
-bash tools/train_8npu.sh config/OCID-VLG/maplegrasp_stage1.yaml
+bash tools/train_8npu.sh config/OCID-VLG/pangu_maplegrasp_stage1.yaml
 ```
 
 Then train Stage 2. Its YAML uses `TRAIN.weight` to load Stage 1's
@@ -339,13 +359,13 @@ Then train Stage 2. Its YAML uses `TRAIN.weight` to load Stage 1's
 may be missing, matching the official flow:
 
 ```bash
-bash tools/train_8npu.sh config/OCID-VLG/maplegrasp_stage2.yaml
+bash tools/train_8npu.sh config/OCID-VLG/pangu_maplegrasp_stage2.yaml
 ```
 
 `TRAIN.weight` is only for the Stage-1-to-Stage-2 transition. To continue an
 interrupted Stage 1 or Stage 2 run, leave `weight` empty and set `TRAIN.resume`
 to that stage's `epoch_010_model.pth` (or its current `best_epoch_*.pth`).
-`config/OCID-VLG/maplegrasp.yaml` is a Stage-1-compatible alias.
+`config/OCID-VLG/pangu_maplegrasp.yaml` is a Stage-1-compatible alias.
 
 ### VCoT extension
 
@@ -358,13 +378,13 @@ checkpoint shapes remain unchanged.
 Train the VCoT segmentation stage first:
 
 ```bash
-bash tools/train_8npu.sh config/vcot/maplegrasp_stage1.yaml
+bash tools/train_8npu.sh config/vcot/pangu_maplegrasp_stage1.yaml
 ```
 
 Then train the VCoT grasp stage from the best Stage-1 IoU checkpoint:
 
 ```bash
-bash tools/train_8npu.sh config/vcot/maplegrasp_stage2.yaml
+bash tools/train_8npu.sh config/vcot/pangu_maplegrasp_stage2.yaml
 ```
 
 The VCoT Stage-2 profile uses `grasp_size_factor: 300`, applies sigmoid to

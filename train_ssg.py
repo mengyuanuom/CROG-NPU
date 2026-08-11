@@ -28,7 +28,7 @@ import utils.config as config
 import wandb
 from utils.dataset import OCIDGraspDataset
 from engine.ssg_engine import train, validate, visualization
-from model import build_ssg
+from model import build_pangu_ssg, build_ssg
 from utils.misc import (init_random_seed, set_random_seed, setup_logger,
                         worker_init_fn, MultiEpochsDataLoader)
 
@@ -109,7 +109,11 @@ def main_worker(gpu, args):
     dist.barrier()
 
     # build model
-    model, param_list = build_ssg(args)
+    architecture = str(getattr(args, "architecture", "ssg")).lower()
+    model_builder = (
+        build_pangu_ssg if architecture == "pangu_ssg" else build_ssg
+    )
+    model, param_list = model_builder(args)
     if args.sync_bn:
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     logger.info(model)

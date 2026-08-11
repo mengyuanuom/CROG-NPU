@@ -8,12 +8,12 @@ Usage:
   bash tools/train_8npu.sh <config.yaml>
 
 Examples:
-  bash tools/train_8npu.sh config/OCID-VLG/crog_multiple_r50.yaml
-  bash tools/train_8npu.sh config/OCID-VLG/drog.yaml
-  bash tools/train_8npu.sh config/OCID-VLG/drogoff.yaml
-  bash tools/train_8npu.sh config/OCID-VLG/etrg.yaml
-  bash tools/train_8npu.sh config/grasp_tools/drogoff.yaml
-  bash tools/train_8npu.sh config/vcot/drogoff.yaml
+  bash tools/train_8npu.sh config/OCID-VLG/pangu_crog_multiple_r50.yaml
+  bash tools/train_8npu.sh config/OCID-VLG/pangu_drog.yaml
+  bash tools/train_8npu.sh config/OCID-VLG/pangu_drogoff.yaml
+  bash tools/train_8npu.sh config/OCID-VLG/pangu_etrg.yaml
+  bash tools/train_8npu.sh config/grasp_tools/pangu_drogoff.yaml
+  bash tools/train_8npu.sh config/vcot/pangu_drogoff.yaml
 EOF
 }
 
@@ -69,7 +69,7 @@ fi
 # DROG and DROG-OFF configs contain a DINO backbone; CROG configs do not.
 # Use that model-owned field instead of relying on a filename convention.
 if grep -Eq '^[[:space:]]*dino_pretrain[[:space:]]*:' "${CONFIG}"; then
-  MODEL_FAMILY="DROG/DROG-OFF"
+  MODEL_FAMILY="PanguDROG/PanguDROG-OFF"
   CLIP_WEIGHT="${CLIP_WEIGHT:-${REPO_ROOT}/pretrain/ViT-B-16.pt}"
   DINO_WEIGHT="${DINO_WEIGHT:-${REPO_ROOT}/pretrain/dinov2_vitb14_reg4_pretrain.pth}"
 
@@ -81,7 +81,7 @@ if grep -Eq '^[[:space:]]*dino_pretrain[[:space:]]*:' "${CONFIG}"; then
     TRAIN.dino_pretrain "${DINO_WEIGHT}"
   )
 else
-  MODEL_FAMILY="CROG"
+  MODEL_FAMILY="PanguCROG"
   CLIP_WEIGHT="${CLIP_WEIGHT:-${REPO_ROOT}/pretrain/RN50.pt}"
 
   python3 tools/download_pretrained.py clip-rn50 --output "${CLIP_WEIGHT}"
@@ -91,8 +91,8 @@ else
   )
 fi
 
-if grep -Eq '^[[:space:]]*architecture[[:space:]]*:[[:space:]]*etrg([[:space:]]|$)' "${CONFIG}"; then
-  MODEL_FAMILY="ETRG"
+if grep -Eq '^[[:space:]]*architecture[[:space:]]*:[[:space:]]*(pangu_)?etrg([[:space:]]|$)' "${CONFIG}"; then
+  MODEL_FAMILY="PanguETRG"
   RESNET_WEIGHT="${RESNET_WEIGHT:-${REPO_ROOT}/pretrain/resnet18-f37072fd.pth}"
   python3 tools/download_pretrained.py resnet18 --output "${RESNET_WEIGHT}"
   TRAIN_OPTS+=(TRAIN.depth_pretrain "${RESNET_WEIGHT}")

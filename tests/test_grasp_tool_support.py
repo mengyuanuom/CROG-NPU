@@ -33,7 +33,13 @@ class GraspToolSupportTest(unittest.TestCase):
 
     def test_all_requested_profiles_share_dataset_and_schedule(self):
         config_dir = ROOT / "config" / "grasp_tools"
-        self.assertEqual({path.stem for path in config_dir.glob("*.yaml")}, MODELS)
+        expected_profiles = MODELS | {
+            f"pangu_{model_name}" for model_name in MODELS
+        }
+        self.assertEqual(
+            {path.stem for path in config_dir.glob("*.yaml")},
+            expected_profiles,
+        )
         for model_name in sorted(MODELS):
             with self.subTest(model=model_name):
                 cfg = yaml.safe_load(
@@ -64,6 +70,25 @@ class GraspToolSupportTest(unittest.TestCase):
                 )
                 self.assertEqual(cfg["TEST"]["grasp_size_activation"], "auto")
                 self.assertTrue(cfg["TEST"]["restore_grasp_size_scale"])
+
+                pangu_cfg = yaml.safe_load(
+                    (config_dir / f"pangu_{model_name}.yaml").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(
+                    pangu_cfg["MODEL"]["architecture"],
+                    f"pangu_{model_name}",
+                )
+                self.assertEqual(pangu_cfg["DATA"], cfg["DATA"])
+                pangu_train = dict(pangu_cfg["TRAIN"])
+                legacy_train = dict(cfg["TRAIN"])
+                self.assertEqual(
+                    pangu_train.pop("exp_name"),
+                    f"pangu_{legacy_train.pop('exp_name')}",
+                )
+                self.assertEqual(pangu_train, legacy_train)
+                self.assertEqual(pangu_cfg["TEST"], cfg["TEST"])
 
     def test_drogoff_skips_fixed_generator_short_side(self):
         cfg = yaml.safe_load(

@@ -75,13 +75,16 @@ class OfficialCROGNPUConfigTest(unittest.TestCase):
         for path in sorted(config_dir.rglob("*.yaml")):
             source = path.read_text(encoding="utf-8")
             relative_config = path.relative_to(config_dir).as_posix()
+            canonical_config = relative_config.replace("/pangu_", "/", 1)
             is_long_run = (
-                relative_config in long_schedule
-                or relative_config.startswith("grasp_tools/")
+                canonical_config in long_schedule
+                or canonical_config.startswith("grasp_tools/")
             )
             expected_epochs = 36 if is_long_run else 24
             expected_milestone = 30 if is_long_run else 20
-            expected_batch = 256 if relative_config == "vcot/crog.yaml" else 32
+            expected_batch = (
+                256 if canonical_config == "vcot/crog.yaml" else 32
+            )
             with self.subTest(config=relative_config):
                 self.assertRegex(
                     source,
