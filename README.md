@@ -48,18 +48,22 @@ Every YAML under `config/` sets both training and validation batch size to
 runs for 24 epochs with one learning-rate milestone at epoch 15.
 All `train_crog.py` YAML profiles use `val_start_epoch: 11` and `val_freq: 1`:
 epochs 1-10 train without validation, then epochs 11-24 validate every epoch.
-Only scheduled recovery checkpoints are written at epochs 5 and 10; there is
-no per-epoch `last_model.pth` write. Grasp models keep exactly one best
-checkpoint selected by J1 after validation begins; a new J1 best deletes and
-replaces the previous one. Each training launch appends a millisecond timestamp
-to `TRAIN.exp_name` and therefore writes to a new directory, including resume
+`latest_model.pth` is atomically replaced after every epoch, while scheduled
+recovery checkpoints are retained at epochs 5 and 10. When evaluation reports
+both J@1 and J@5, independent metric-labelled `best_j1_epoch_*.pth` and
+`best_j5_epoch_*.pth` checkpoints are maintained. VCoT's single GraspSR metric
+continues to use `best_epoch_*_GraspSR_*.pth`. Each training launch appends a
+millisecond timestamp to `TRAIN.exp_name` and therefore writes to a new
+directory, including resume
 launches. For example:
 
 ```text
 exp/ocid_vlg/ggcnnclip_ocid_vlg_8npu_20260731_143025_123/
 epoch_005_model.pth
 epoch_010_model.pth
-best_epoch_011_J1_90.92_J5_93.69.pth
+latest_model.pth
+best_j1_epoch_011_J1_90.92_J5_93.69.pth
+best_j5_epoch_014_J1_90.71_J5_94.03.pth
 ```
 
 Pure segmentation stages use `best_epoch_011_IoU_80.60.pth`. MapleGrasp

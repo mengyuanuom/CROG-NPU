@@ -280,14 +280,27 @@ class OfficialCROGNPUConfigTest(unittest.TestCase):
         self.assertIn("'last_eval_epoch': last_eval_epoch", source)
         self.assertIn('f"epoch_{epoch_log:03d}_model.pth"', source)
         self.assertNotIn("_replace_epoch_alias", source)
-        self.assertNotIn('"last_model.pth"', source)
-        self.assertIn('"best",', source)
+        self.assertIn('"latest_model.pth"', source)
+        self.assertIn("'best_j1': best_j1", source)
+        self.assertIn("'best_j5': best_j5", source)
+        self.assertIn("save_best_j1", source)
+        self.assertIn("save_best_j5", source)
+        self.assertIn('metric_prefix = "best_j1"', source)
+        self.assertIn('"best_j5",', source)
         self.assertIn('f"IoU_{100.0 * float(iou):.2f}"', source)
         self.assertIn(
             'f"J1_{100.0 * j1:.2f}_J5_{100.0 * j5:.2f}"', source
         )
         self.assertIn(
             'output_dir.glob(f"{prefix}_epoch_*.pth")', source
+        )
+        self.assertIn('checkpoint.get("best_j1", legacy_best_j1)', source)
+        self.assertIn('checkpoint.get("best_j5", -1.0)', source)
+        self.assertIn('"best_jindex_model.pth": (', source)
+        self.assertIn('"best_j1_model.pth": (', source)
+        self.assertIn('"best_j5_model.pth": (', source)
+        self.assertIn(
+            "for metric_pattern in metric_patterns", source
         )
         self.assertIn("os.remove(temporary_checkpoint)", source)
 

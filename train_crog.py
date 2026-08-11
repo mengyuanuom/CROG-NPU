@@ -115,14 +115,20 @@ def _resolve_timestamped_checkpoint(checkpoint_path):
         if (run_directory / requested.name).is_file()
     ]
     legacy_patterns = {
-        "best_iou_model.pth": "best_epoch_*_IoU_*.pth",
-        "best_jindex_model.pth": "best_epoch_*_J1_*_J5_*.pth",
+        "best_iou_model.pth": ("best_epoch_*_IoU_*.pth",),
+        "best_jindex_model.pth": (
+            "best_j1_epoch_*_J1_*_J5_*.pth",
+            "best_epoch_*_J1_*_J5_*.pth",
+        ),
+        "best_j1_model.pth": ("best_j1_epoch_*_J1_*_J5_*.pth",),
+        "best_j5_model.pth": ("best_j5_epoch_*_J1_*_J5_*.pth",),
     }
-    metric_pattern = legacy_patterns.get(requested.name)
-    if not candidates and metric_pattern:
+    metric_patterns = legacy_patterns.get(requested.name, ())
+    if not candidates and metric_patterns:
         candidates = [
             candidate
             for run_directory in run_directories
+            for metric_pattern in metric_patterns
             for candidate in run_directory.glob(metric_pattern)
             if candidate.is_file()
         ]
@@ -468,7 +474,8 @@ def main_worker(local_rank, args):
                                  collate_fn=val_data.collate_fn)
 
     best_IoU = -1.0
-    best_j_index = -1.0
+    best_j1 = -1.0
+    best_j5 = -1.0
     last_eval_epoch = 0
     last_iou = None
     last_prec_dict = {}
@@ -480,7 +487,11 @@ def main_worker(local_rank, args):
             checkpoint = torch.load(args.resume, map_location="cpu")
             args.start_epoch = checkpoint['epoch']
             best_IoU = checkpoint["best_iou"]
-            best_j_index = checkpoint["best_j_index"]
+            legacy_best_j1 = checkpoint.get("best_j_index", -1.0)
+            best_j1 = checkpoint.get("best_j1", legacy_best_j1)
+            best_j5 = checkpoint.get("best_j5", -1.0)
+            best_j1 = float(best_j1)
+            best_j5 = float(best_j5)
             last_eval_epoch = int(
                 checkpoint.get("last_eval_epoch", checkpoint["epoch"])
             )
@@ -550,8 +561,8 @@ def main_worker(local_rank, args):
     if args.rank == 0:
         logger.info(
             "Validation schedule: enabled={}, starts at epoch {}, every {} "
-            "epoch(s); recovery checkpoints={}; checkpoint policy=scheduled "
-            "recovery + one metric-labelled best",
+            "epoch(s); recovery checkpoints={}; checkpoint policy=latest "
+            "+ scheduled recovery + independent metric-labelled bests",
             evaluate_enabled,
             val_start_epoch,
             val_freq,
@@ -610,25 +621,40 @@ def main_worker(local_rank, args):
         # This is the same uninterrupted training schedule as upstream.
         scheduler.step(epoch_log)
 
-        # Save only explicit recovery epochs and newly improved best models.
+        # Save latest every epoch plus explicit recovery and improved bests.
         if dist.get_rank() == 0:
             improved_iou = bool(do_eval and iou > best_IoU)
-            improved_j = bool(
-                do_eval and j_index and j_index[0] > best_j_index
+            improved_j1 = bool(
+                do_eval and len(j_index) >= 1 and j_index[0] > best_j1
+            )
+            improved_j5 = bool(
+                do_eval and len(j_index) >= 2 and j_index[1] > best_j5
             )
             if improved_iou:
                 best_IoU = iou
-            if improved_j:
-                best_j_index = j_index[0]
+            if improved_j1:
+                best_j1 = float(j_index[0])
+            if improved_j5:
+                best_j5 = float(j_index[1])
 
+            save_latest = True
             save_recovery = epoch_log in save_epochs
             save_best_iou = bool(
                 do_eval and segmentation_only and improved_iou
             )
-            save_best_j = bool(
-                do_eval and not segmentation_only and improved_j
+            save_best_j1 = bool(
+                do_eval and not segmentation_only and improved_j1
             )
-            if save_recovery or save_best_iou or save_best_j:
+            save_best_j5 = bool(
+                do_eval and not segmentation_only and improved_j5
+            )
+            if (
+                save_latest
+                or save_recovery
+                or save_best_iou
+                or save_best_j1
+                or save_best_j5
+            ):
                 checkpoint = {
                     'epoch': epoch_log,
                     'base_exp_name': args.base_exp_name,
@@ -637,7 +663,9 @@ def main_worker(local_rank, args):
                     'evaluated': do_eval,
                     'cur_iou': iou,
                     'best_iou': best_IoU,
-                    'best_j_index': best_j_index,
+                    'best_j_index': best_j1,
+                    'best_j1': best_j1,
+                    'best_j5': best_j5,
                     'prec': prec_dict,
                     'j_index': j_index,
                     'last_eval_epoch': last_eval_epoch,
@@ -653,6 +681,15 @@ def main_worker(local_rank, args):
                     args.output_dir, ".checkpoint.pth.tmp"
                 )
                 torch.save(checkpoint, temporary_checkpoint)
+
+                if save_latest:
+                    latest_name = os.path.join(
+                        args.output_dir, "latest_model.pth"
+                    )
+                    _replace_with_link_or_copy(
+                        temporary_checkpoint, latest_name
+                    )
+                    logger.info("Updated latest checkpoint: {}", latest_name)
 
                 if save_recovery:
                     recovery_name = os.path.join(
@@ -677,23 +714,40 @@ def main_worker(local_rank, args):
                     )
                     logger.info("Replaced best checkpoint: {}", best_name)
 
-                if save_best_j:
+                if save_best_j1:
                     j1 = float(j_index[0])
                     if str(getattr(args, "evaluation_protocol", "")).lower() == "vcot_official":
                         metric_suffix = f"GraspSR_{100.0 * j1:.2f}"
+                        metric_prefix = "best"
                     else:
                         j5 = float(j_index[1]) if len(j_index) > 1 else 0.0
                         metric_suffix = (
                             f"J1_{100.0 * j1:.2f}_J5_{100.0 * j5:.2f}"
                         )
+                        metric_prefix = "best_j1"
                     best_name = _replace_metric_alias(
                         temporary_checkpoint,
                         args.output_dir,
-                        "best",
+                        metric_prefix,
                         epoch_log,
                         metric_suffix,
                     )
-                    logger.info("Replaced best checkpoint: {}", best_name)
+                    logger.info("Replaced best J1 checkpoint: {}", best_name)
+
+                if save_best_j5:
+                    j1 = float(j_index[0])
+                    j5 = float(j_index[1])
+                    metric_suffix = (
+                        f"J1_{100.0 * j1:.2f}_J5_{100.0 * j5:.2f}"
+                    )
+                    best_name = _replace_metric_alias(
+                        temporary_checkpoint,
+                        args.output_dir,
+                        "best_j5",
+                        epoch_log,
+                        metric_suffix,
+                    )
+                    logger.info("Replaced best J5 checkpoint: {}", best_name)
 
                 os.remove(temporary_checkpoint)
         empty_cache()
@@ -702,8 +756,8 @@ def main_worker(local_rank, args):
     # if dist.get_rank() == 0:
     #     wandb.finish()
 
-    logger.info("* Best IoU={}  Best J1={} *".format(
-        best_IoU, best_j_index
+    logger.info("* Best IoU={}  Best J1={}  Best J5={} *".format(
+        best_IoU, best_j1, best_j5
     ))
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
